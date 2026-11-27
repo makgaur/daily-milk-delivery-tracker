@@ -405,6 +405,30 @@
       </div>
     </section>
     <main class="wrap" id="appMain" hidden>
+      <!-- Household selector -->
+      <section class="panel" style="padding: 12px 14px">
+        <div class="row" style="align-items: end">
+          <div class="field">
+            <label for="householdSelect">Currently selected household</label>
+            <select id="householdSelect">
+              <option value="">Loading households…</option>
+            </select>
+          </div>
+          <button
+            class="btn primary"
+            id="addHousehold"
+            type="button"
+            style="height: 43px"
+          >
+            + Add house
+          </button>
+        </div>
+        <p class="small" style="margin: 8px 0 0">
+          Each household has its own delivery records, milk rate and billing
+          cycle.
+        </p>
+      </section>
+
       <section class="panel" style="padding: 10px 14px; margin-top: 14px">
         <div class="top">
           <span class="small" id="cloudStatus">Connecting…</span
@@ -596,7 +620,9 @@
           selected = iso(today),
           status = "delivered",
           currentUser = null,
-          channel = null;
+          channel = null,
+          households = [],
+          activeHouseholdId = null;
         const KEY = "milklog-v1";
         let db = {
           entries: {},
@@ -822,32 +848,109 @@
           $("note").value = e?.note || "";
           $("entryState").textContent = e ? "Saved entry" : "Not recorded";
         }
-        async function pullCloud() {
+
+        async function loadHouseholds() {
           if (!currentUser) return;
-          cloud("Syncing from cloud…");
+
+          cloud("Loading households…");
+
+          const { data, error } = await client
+            .from("household_members")
+            .select("household_id, role, households(id, name, owner_user_id)")
+            .eq("user_id", currentUser.id);
+
+          if (error) throw error;
+
+          households = (data || [])
+            .map((row) => row.households)
+            .filter(Boolean);
+
+          // Create a default household for a new account.
+          if (households.length === 0) {
+            const { data: newHouse, error: createError } = await client
+              .from("households")
+              .insert({
+                name: "Home",
+                owner_user_id: currentUser.id,
+              })
+              .select("id, name, owner_user_id")
+              .single();
+
+            if (createError) throw createError;
+
+            const { error: memberError } = await client
+              .from("household_members")
+              .insert({
+                household_id: newHouse.id,
+                user_id: currentUser.id,
+                role: "owner",
+              });
+
+            if (memberError) throw memberError;
+
+            households = [newHouse];
+          }
+
+          // Restore the last selected household on this browser.
+          const storageKey = "milklog-active-household-" + currentUser.id;
+          const savedHouseholdId = localStorage.getItem(storageKey);
+
+          activeHouseholdId = households.some((h) => h.id === savedHouseholdId)
+            ? savedHouseholdId
+            : households[0].id;
+
+          const selector = $("householdSelect");
+          selector.innerHTML = "";
+
+          households.forEach((house) => {
+            const option = document.createElement("option");
+            option.value = house.id;
+            option.textContent = house.name;
+            selector.appendChild(option);
+          });
+
+          selector.value = activeHouseholdId;
+          localStorage.setItem(storageKey, activeHouseholdId);
+        }
+
+        async function pullCloud() {
+          if (!currentUser || !activeHouseholdId) return;
+
+          cloud("Syncing household records…");
+
+          const householdId = activeHouseholdId;
+
           const [entriesRes, settingsRes] = await Promise.all([
             client
               .from("milk_entries")
               .select("delivery_date,status,quantity,note")
-              .eq("user_id", currentUser.id),
+              .eq("household_id", householdId),
+
             client
               .from("milk_settings")
               .select("rate,default_quantity,billing_start_day")
-              .eq("user_id", currentUser.id)
+              .eq("household_id", householdId)
               .maybeSingle(),
           ]);
+
           if (entriesRes.error) throw entriesRes.error;
           if (settingsRes.error) throw settingsRes.error;
+
+          // Ignore results if the user switched households during the request.
+          if (activeHouseholdId !== householdId) return;
+
           const cloudEntries = {};
-          (entriesRes.data || []).forEach(
-            (r) =>
-              (cloudEntries[r.delivery_date] = {
-                status: r.status,
-                qty: Number(r.quantity) || 0,
-                note: r.note || "",
-              }),
-          );
+
+          (entriesRes.data || []).forEach((r) => {
+            cloudEntries[r.delivery_date] = {
+              status: r.status,
+              qty: Number(r.quantity) || 0,
+              note: r.note || "",
+            };
+          });
+
           db.entries = cloudEntries;
+
           if (settingsRes.data) {
             db.rate = Number(settingsRes.data.rate);
             db.defaultQty = Number(settingsRes.data.default_quantity);
@@ -856,29 +959,44 @@
           } else {
             await pushSettings();
           }
+
           persist();
+
           $("rate").value = db.rate;
           $("defaultQty").value = db.defaultQty;
           $("billingStartDay").value = db.billingStartDay;
+
           render();
           loadEntry();
+
           cloud("☁ Synced · " + currentUser.email);
         }
+
         async function pushSettings() {
+          if (!currentUser || !activeHouseholdId) return;
+
           const { error } = await client.from("milk_settings").upsert(
             {
+              household_id: activeHouseholdId,
               user_id: currentUser.id,
               rate: db.rate,
               default_quantity: db.defaultQty,
               updated_at: new Date().toISOString(),
               billing_start_day: db.billingStartDay,
             },
-            { onConflict: "user_id" },
+            { onConflict: "household_id" },
           );
+
           if (error) throw error;
         }
+
         async function saveEntry(date, item) {
+          if (!currentUser || !activeHouseholdId) {
+            throw new Error("No household selected");
+          }
+
           const payload = {
+            household_id: activeHouseholdId,
             user_id: currentUser.id,
             delivery_date: date,
             status: item.status,
@@ -886,47 +1004,58 @@
             note: item.note || "",
             updated_at: new Date().toISOString(),
           };
-          const { error } = await client
-            .from("milk_entries")
-            .upsert(payload, { onConflict: "user_id,delivery_date" });
+
+          const { error } = await client.from("milk_entries").upsert(payload, {
+            onConflict: "household_id,delivery_date",
+          });
+
           if (error) throw error;
         }
+
         function subscribe() {
-          if (channel) client.removeChannel(channel);
+          if (channel) {
+            client.removeChannel(channel);
+          }
+
+          if (!activeHouseholdId) return;
+
+          const householdId = activeHouseholdId;
+
           channel = client
-            .channel("milklog-" + currentUser.id)
+            .channel("milklog-" + householdId)
+
+            // Listen for delivery changes in this household.
             .on(
               "postgres_changes",
               {
                 event: "*",
                 schema: "public",
                 table: "milk_entries",
-                filter: "user_id=eq." + currentUser.id,
+                filter: "household_id=eq." + householdId,
               },
               async () => {
-                try {
+                if (activeHouseholdId === householdId) {
                   await pullCloud();
-                } catch (e) {
-                  cloud("Sync issue: " + e.message);
                 }
               },
             )
+
+            // Listen for billing/settings changes in this household.
             .on(
               "postgres_changes",
               {
                 event: "*",
                 schema: "public",
                 table: "milk_settings",
-                filter: "user_id=eq." + currentUser.id,
+                filter: "household_id=eq." + householdId,
               },
               async () => {
-                try {
+                if (activeHouseholdId === householdId) {
                   await pullCloud();
-                } catch (e) {
-                  cloud("Sync issue: " + e.message);
                 }
               },
             )
+
             .subscribe();
         }
         async function enterApp(session) {
@@ -935,6 +1064,7 @@
           $("appMain").hidden = false;
           cloud("Connected · loading records…");
           try {
+            await loadHouseholds();
             await pullCloud();
             subscribe();
           } catch (e) {
@@ -987,6 +1117,101 @@
           .forEach((b) =>
             b.addEventListener("click", () => setStatus(b.dataset.status)),
           );
+        $("householdSelect").addEventListener("change", async (e) => {
+          const nextId = e.target.value;
+
+          if (!nextId || nextId === activeHouseholdId) return;
+          if (!currentUser) return;
+
+          try {
+            // Remember the selected household.
+            activeHouseholdId = nextId;
+
+            localStorage.setItem(
+              "milklog-active-household-" + currentUser.id,
+              nextId,
+            );
+
+            // Clear the previous household's data from memory.
+            db = {
+              entries: {},
+              rate: 85,
+              defaultQty: 1,
+              billingStartDay: 1,
+            };
+
+            persist();
+
+            // Load the newly selected household.
+            await pullCloud();
+
+            // Subscribe to changes for this household.
+            subscribe();
+
+            cloud("☁ Household switched · " + currentUser.email);
+          } catch (error) {
+            console.error("Household switch failed:", error);
+            cloud("Household switch failed: " + error.message);
+          }
+        });
+        $("addHousehold").addEventListener("click", async () => {
+          if (!currentUser) {
+            alert("Please sign in first.");
+            return;
+          }
+
+          const name = prompt("Enter household name:");
+
+          if (!name || !name.trim()) return;
+
+          try {
+            cloud("Creating household…");
+
+            // 1. Create the household.
+            const { data: newHouse, error: houseError } = await client
+              .from("households")
+              .insert({
+                name: name.trim(),
+                owner_user_id: currentUser.id,
+              })
+              .select("id, name, owner_user_id")
+              .single();
+
+            if (houseError) throw houseError;
+
+            // 2. Add the current user as its owner.
+            const { error: memberError } = await client
+              .from("household_members")
+              .insert({
+                household_id: newHouse.id,
+                user_id: currentUser.id,
+                role: "owner",
+              });
+
+            if (memberError) throw memberError;
+
+            // 3. Add the new household to the dropdown.
+            households.push(newHouse);
+
+            const selector = $("householdSelect");
+            const option = document.createElement("option");
+
+            option.value = newHouse.id;
+            option.textContent = newHouse.name;
+
+            selector.appendChild(option);
+
+            // 4. Select it and trigger the existing switch listener.
+            selector.value = newHouse.id;
+            selector.dispatchEvent(new Event("change"));
+
+            cloud("New household created: " + newHouse.name);
+          } catch (error) {
+            console.error("Household creation failed:", error);
+            cloud("Unable to create household: " + error.message);
+            alert("Unable to create household: " + error.message);
+          }
+        });
         $("entryDate").addEventListener("change", (e) => {
           selected = e.target.value;
           if (!selected) return;
@@ -1025,7 +1250,7 @@
           const { error } = await client
             .from("milk_entries")
             .delete()
-            .eq("user_id", currentUser.id)
+            .eq("household_id", activeHouseholdId)
             .eq("delivery_date", selected);
           if (error) {
             toast("Could not clear: " + error.message);
