@@ -646,7 +646,11 @@
 
           const next = new Date(base.getFullYear(), base.getMonth() + 1, day);
 
-          const end = new Date(next.getFullYear(), next.getMonth(), 0);
+          const end = new Date(
+            next.getFullYear(),
+            next.getMonth(),
+            next.getDate() - 1,
+          );
 
           return {
             start: iso(start),
