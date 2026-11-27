@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#176b52">
+<title>MilkLog — Milk Delivery Tracker</title>
+<style>
+:root{--bg:#f4f7f5;--card:#fff;--ink:#17231e;--muted:#6b7972;--green:#176b52;--green-soft:#e3f3ec;--red:#b83b3b;--red-soft:#fdeaea;--line:#e5ebe7;--amber:#95621b;--amber-soft:#fff3d9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:var(--green);color:#fff;padding:22px 18px 24px;border-radius:0 0 22px 22px}
+.wrap{max-width:760px;margin:auto;padding:0 15px 30px}header .wrap{padding-bottom:0}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px}.brand{font-size:21px;font-weight:750;letter-spacing:-.4px}.sub{opacity:.82;font-size:13px;margin-top:4px}
+.monthnav{display:flex;align-items:center;justify-content:space-between;margin:20px 0 12px}.monthnav button{border:1px solid #ffffff55;background:#ffffff18;color:white;border-radius:10px;width:38px;height:36px;font-size:20px}
+.monthlabel{font-weight:700;font-size:17px}
+main{margin-top:-1px}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:15px 0}
+.stat,.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px}
+.stat .value{font-size:25px;font-weight:750;letter-spacing:-.6px}.stat .label{font-size:12px;color:var(--muted);margin-top:4px}
+.stat.green .value{color:var(--green)}.stat.red .value{color:var(--red)}
+.panel{margin:12px 0}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}.panel h2{font-size:16px;margin:0}
+.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.weekday{text-align:center;color:var(--muted);font-size:11px;padding:3px 0 5px}
+.day{min-height:58px;border:1px solid var(--line);background:#fafcfb;border-radius:10px;padding:6px 2px;text-align:center;cursor:pointer;position:relative}
+.day .num{font-size:13px;font-weight:650}.day .qty{font-size:10px;margin-top:6px;color:var(--muted)}
+.day.delivered{background:var(--green-soft);border-color:#b9dfce}.day.absent{background:var(--red-soft);border-color:#f2c4c4}.day.absent .qty{color:var(--red)}.day.delivered .qty{color:var(--green);font-weight:650}
+.day.today{outline:2px solid var(--green);outline-offset:1px}.day.selected{box-shadow:inset 0 0 0 2px var(--green)}.day.empty{visibility:hidden}
+.hint{font-size:12px;color:var(--muted);margin-top:10px}
+form{display:grid;gap:11px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+input,select,textarea{width:100%;border:1px solid #d8e1db;border-radius:10px;padding:11px 12px;font:inherit;background:#fff;color:var(--ink)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer}.btn{border:0;border-radius:10px;padding:11px 14px;font-weight:650}.primary{background:var(--green);color:white}.secondary{background:#edf2ef;color:var(--ink)}.danger{background:var(--red-soft);color:var(--red)}.btn:disabled{opacity:.45;cursor:not-allowed}
+.status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.status button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px}.status button.active[data-status="delivered"]{background:var(--green-soft);border-color:#9bcfb8;color:var(--green);font-weight:700}.status button.active[data-status="absent"]{background:var(--red-soft);border-color:#e9aaaa;color:var(--red);font-weight:700}
+.summaryline{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}.summaryline:last-child{border:0}.summaryline strong{font-variant-numeric:tabular-nums}
+.settings{display:grid;grid-template-columns:1fr 1fr;gap:10px}.small{font-size:11px;color:var(--muted);line-height:1.5}
+footer{text-align:center;color:var(--muted);font-size:11px;padding:12px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#17231e;color:white;padding:10px 15px;border-radius:20px;font-size:13px;display:none;z-index:5}
+@media(min-width:600px){.stats{grid-template-columns:repeat(4,1fr)}.day{min-height:72px}.day .qty{font-size:11px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+ <div class="top"><div><div class="brand">🥛 MilkLog</div><div class="sub">Your daily milk delivery record</div></div><div style="font-size:12px;opacity:.85">₹<span id="rateTop">85</span> / litre</div></div>
+ <div class="monthnav"><button id="prev" aria-label="Previous month">‹</button><div class="monthlabel" id="monthTitle"></div><button id="next" aria-label="Next month">›</button></div>
+</div></header>
+<main class="wrap">
+ <section class="stats">
+  <div class="stat green"><div class="value" id="litres">0 L</div><div class="label">Total delivered</div></div>
+  <div class="stat red"><div class="value" id="absent">0</div><div class="label">Absent days</div></div>
+  <div class="stat"><div class="value" id="delivered">0</div><div class="label">Delivery days</div></div>
+  <div class="stat"><div class="value" id="bill">₹0</div><div class="label">Estimated monthly bill</div></div>
+ </section>
+ <section class="panel">
+  <div class="panelhead"><h2>Monthly calendar</h2><div class="legend"><span><i class="dot" style="background:#39a477"></i>Delivered</span><span><i class="dot" style="background:#d65c5c"></i>Absent</span><span><i class="dot" style="background:#cbd5ce"></i>Not set</span></div></div>
+  <div class="calendar" id="calendar"></div>
+  <div class="hint">Tap any date to add or update its delivery. Unmarked dates are not counted as absent.</div>
+ </section>
+ <section class="panel" id="entryPanel">
+  <div class="panelhead"><h2 id="entryTitle">Daily entry</h2><span class="small" id="entryState">Select a date</span></div>
+  <form id="entryForm">
+   <div class="field"><label for="entryDate">Date</label><input type="date" id="entryDate" required></div>
+   <div class="field"><label>Delivery status</label><div class="status"><button type="button" data-status="delivered" class="active">✓ Delivered</button><button type="button" data-status="absent">✕ Absent</button></div></div>
+   <div class="field" id="quantityField"><label for="quantity">Quantity delivered (litres)</label><input id="quantity" type="number" min="0.01" max="99" step="0.01" value="1"></div>
+   <div class="field"><label for="note">Note (optional)</label><input id="note" maxlength="120" placeholder="e.g. Late delivery, extra milk"></div>
+   <div class="actions"><button class="btn primary" type="submit">Save entry</button><button class="btn secondary" type="button" id="clearEntry">Clear date</button></div>
+  </form>
+ </section>
+ <section class="panel">
+  <div class="panelhead"><h2>Monthly billing</h2><span class="small">Based on delivered litres</span></div>
+  <div class="summaryline"><span>Milk delivered</span><strong id="sumLitres">0 L</strong></div>
+  <div class="summaryline"><span>Rate per litre</span><strong id="sumRate">₹85</strong></div>
+  <div class="summaryline"><span>Estimated amount</span><strong id="sumBill">₹0</strong></div>
+  <div class="summaryline"><span>Days not recorded</span><strong id="pending">0</strong></div>
+ </section>
+ <section class="panel">
+  <div class="panelhead"><h2>Settings & data</h2></div>
+  <div class="settings">
+   <div class="field"><label for="rate">Milk price (₹ / litre)</label><input id="rate" type="number" min="0" step="0.01" value="85"></div>
+   <div class="field"><label for="defaultQty">Usual daily quantity (L)</label><input id="defaultQty" type="number" min="0.01" step="0.01" value="1"></div>
+  </div>
+  <div class="actions" style="margin-top:12px"><button class="btn secondary" id="export">Export CSV</button><button class="btn secondary" id="backup">Download backup</button><button class="btn secondary" id="restoreBtn">Restore backup</button><input id="restoreFile" type="file" accept="application/json" hidden></div>
+  <p class="small">Records are saved in this browser on this device. Export a backup periodically. To use the same tracker on multiple devices, you'll need a hosted version with shared storage.</p>
+ </section>
+ <footer>MilkLog · Private to this browser · No account required</footer>
+</main><div class="toast" id="toast"></div>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const today=new Date(); let view=new Date(today.getFullYear(),today.getMonth(),1);
+let selected=iso(today), status='delivered';
+const KEY='milklog-v1';
+let db={entries:{},rate:85,defaultQty:1};
+try{const saved=JSON.parse(localStorage.getItem(KEY)||'null');if(saved&&saved.entries)db={...db,...saved}}catch(e){}
+function persist(){localStorage.setItem(KEY,JSON.stringify(db));}
+function iso(d){return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')}
+function money(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:2})}
+function monthKey(){return view.getFullYear()+'-'+String(view.getMonth()+1).padStart(2,'0')}
+function showToast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',1900)}
+function stats(){
+ const prefix=monthKey()+'-', entries=Object.entries(db.entries).filter(([k])=>k.startsWith(prefix));
+ let litres=0,abs=0,del=0;
+ entries.forEach(([,e])=>{if(e.status==='absent')abs++;else{del++;litres+=Number(e.qty)||0}});
+ const days=new Date(view.getFullYear(),view.getMonth()+1,0).getDate();
+ const pending=days-entries.length, bill=litres*Number(db.rate||0);
+ $('litres').textContent=litres.toFixed(2).replace(/\.?0+$/,'')+' L';$('absent').textContent=abs;$('delivered').textContent=del;$('bill').textContent=money(bill);
+ $('sumLitres').textContent=litres.toFixed(2).replace(/\.?0+$/,'')+' L';$('sumRate').textContent=money(db.rate);$('sumBill').textContent=money(bill);$('pending').textContent=pending;
+}
+function render(){
+ $('monthTitle').textContent=view.toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+ $('rateTop').textContent=db.rate;
+ const cal=$('calendar');cal.innerHTML='';
+ ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(x=>{let el=document.createElement('div');el.className='weekday';el.textContent=x;cal.append(el)});
+ const first=new Date(view.getFullYear(),view.getMonth(),1), offset=(first.getDay()+6)%7, count=new Date(view.getFullYear(),view.getMonth()+1,0).getDate();
+ for(let i=0;i<offset;i++){let e=document.createElement('div');e.className='day empty';cal.append(e)}
+ for(let day=1;day<=count;day++){
+  const d=new Date(view.getFullYear(),view.getMonth(),day), key=iso(d), entry=db.entries[key], el=document.createElement('button');
+  el.type='button';el.className='day'+(entry?' '+entry.status:'')+(key===iso(today)?' today':'')+(key===selected?' selected':'');
+  const num=document.createElement('div');num.className='num';num.textContent=day;el.append(num);
+  const q=document.createElement('div');q.className='qty';q.textContent=entry?(entry.status==='absent'?'Absent':Number(entry.qty)+' L'):'—';el.append(q);
+  el.addEventListener('click',()=>{selected=key;loadEntry();render()});cal.append(el);
+ }
+ stats();
+}
+function setStatus(s){status=s;document.querySelectorAll('[data-status]').forEach(b=>b.classList.toggle('active',b.dataset.status===s));$('quantityField').style.display=s==='delivered'?'block':'none'}
+function loadEntry(){
+ $('entryDate').value=selected;$('entryTitle').textContent='Daily entry · '+new Date(selected+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+ const e=db.entries[selected];setStatus(e?.status||'delivered');$('quantity').value=e?.qty??db.defaultQty;$('note').value=e?.note||'';$('entryState').textContent=e?'Saved entry':'Not recorded';
+}
+document.querySelectorAll('[data-status]').forEach(b=>b.addEventListener('click',()=>setStatus(b.dataset.status)));
+$('entryDate').addEventListener('change',e=>{selected=e.target.value;if(!selected)return;loadEntry();render()});
+$('entryForm').addEventListener('submit',e=>{e.preventDefault();selected=$('entryDate').value;if(!selected)return;
+ const item={status,qty:status==='delivered'?Number($('quantity').value):0,note:$('note').value.trim()};
+ if(status==='delivered'&&(!item.qty||item.qty<=0)){showToast('Enter a valid quantity');return}
+ db.entries[selected]=item;persist();render();loadEntry();showToast('Daily entry saved')});
+$('clearEntry').addEventListener('click',()=>{delete db.entries[selected];persist();render();loadEntry();showToast('Entry cleared')});
+$('prev').addEventListener('click',()=>{view=new Date(view.getFullYear(),view.getMonth()-1,1);selected=iso(view);render();loadEntry()});
+$('next').addEventListener('click',()=>{view=new Date(view.getFullYear(),view.getMonth()+1,1);selected=iso(view);render();loadEntry()});
+$('rate').value=db.rate;$('defaultQty').value=db.defaultQty;
+$('rate').addEventListener('change',e=>{db.rate=Math.max(0,Number(e.target.value)||0);persist();render()});
+$('defaultQty').addEventListener('change',e=>{db.defaultQty=Math.max(.01,Number(e.target.value)||1);persist();if(!db.entries[selected])$('quantity').value=db.defaultQty});
+$('export').addEventListener('click',()=>{
+ let rows=[['Date','Status','Quantity (L)','Note','Amount (INR)']];
+ Object.keys(db.entries).sort().forEach(k=>{let e=db.entries[k];rows.push([k,e.status,e.qty,e.note||'',e.status==='delivered'?Number(e.qty)*Number(db.rate):0])});
+ const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');
+ download(new Blob([csv],{type:'text/csv'}),'milklog-records.csv');
+});
+$('backup').addEventListener('click',()=>download(new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),'milklog-backup.json'));
+function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href)}
+$('restoreBtn').addEventListener('click',()=>$('restoreFile').click());
+$('restoreFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!data.entries)throw Error();db={...db,...data};persist();$('rate').value=db.rate;$('defaultQty').value=db.defaultQty;render();loadEntry();showToast('Backup restored')}catch(err){showToast('Invalid backup file')}e.target.value=''});
+render();loadEntry();
+})();
+</script>
+</body></html>
